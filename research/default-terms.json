@@ -1,0 +1,56 @@
+{
+  "exerciseZh": [
+    "运动处方",
+    "运动干预",
+    "身体活动",
+    "有氧运动",
+    "抗阻训练",
+    "力量训练",
+    "联合训练",
+    "高强度间歇训练",
+    "步行",
+    "太极",
+    "八段锦"
+  ],
+  "exerciseEn": [
+    "exercise prescription",
+    "exercise intervention",
+    "physical activity",
+    "aerobic exercise",
+    "resistance training",
+    "strength training",
+    "combined training",
+    "concurrent training",
+    "high-intensity interval training",
+    "walking",
+    "tai chi",
+    "baduanjin"
+  ],
+  "glucoseZh": [
+    "糖尿病",
+    "2型糖尿病",
+    "糖尿病前期",
+    "糖耐量受损",
+    "空腹血糖",
+    "糖化血红蛋白",
+    "餐后2小时血糖",
+    "胰岛素敏感性",
+    "胰岛素抵抗"
+  ],
+  "glucoseEn": [
+    "diabetes",
+    "type 2 diabetes",
+    "prediabetes",
+    "impaired glucose tolerance",
+    "fasting plasma glucose",
+    "HbA1c",
+    "2-hour plasma glucose",
+    "insulin sensitivity",
+    "insulin resistance"
+  ],
+  "designZh": [
+    "试验",
+    "随机对照",
+    "前后对照"
+  ]
+}
