@@ -42,3 +42,17 @@ npm run build
 ## 许可与来源
 
 本项目代码和随附界面素材按 [MIT License](LICENSE) 发布。随附的 Sites 构建插件保留[上游 MIT 许可](scripts/vite/sites-vite-plugin.LICENSE)，各 npm 依赖使用各自许可证。示例题录、数值和出处见 `research/studies.js`。论文全文均链接至出版方或公开文献库，全文与外部数据集的再利用遵循各自的许可。
+
+## 跨库检索配置
+
+跨库检索页读取各专库的连接状态。服务端调用使用 Sites 环境变量，密钥设为 Secret。授权检索仅向 `CATALOG_ALLOWED_USERS` 中逗号分隔的已登录账号 ID 开放。按照机构许可填写。配置后重新部署版本。
+
+| 数据库 | 服务端设置 | 检索范围 |
+|---|---|---|
+| 万方 | WFDATA_APP_KEY | 开放平台的期刊、学位与会议 |
+| Web of Science | WOS_API_KEY | Starter API 核心合集 |
+| SPORTDiscus | EBSCO_PROFILE、EBSCO_PASSWORD；SPORTDISCUS_DB 可填 s3h（默认 sph） | EBSCOhost 非 Discovery profile，限定体育库 |
+| Cochrane Library | 同一 EBSCOhost profile 需有 cbh 和 chh 权限 | CENTRAL 与 CDSR；另有无需授权的 PubMed / Europe PMC 收录的 CDSR 期刊检索 |
+| 中国知网、维普 | CNKI_SRU_URL、VIP_SRU_URL；如需 Bearer 验证分别配置 CNKI_SRU_TOKEN、VIP_SRU_TOKEN | 仅支持机构提供的、明确限定该库的 HTTPS SRU 1.2 网关，需支持 CQL、DC/XML 及按页取数。普通数据库主页或跨库发现服务 URL 无法替代专库端点。 |
+
+检索结果保存原库、题名、标识符和提供的原文链接。接口访问失败不会记录为零命中。外部官网检索受数据库登录状态及搜索框语法影响；系统综述应核对官网执行的检索式。

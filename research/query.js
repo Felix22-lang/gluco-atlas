@@ -68,5 +68,20 @@ export function buildQuery(db, preset, extensions, rct, designLimit = false) {
 }
 export function dbUrl(db, query) {
   if (db.id === "PubMed") return db.url + "?term=" + encodeURIComponent(query);
+  if (db.id === "中国知网") return "https://kns.cnki.net/kns8s/defaultresult/index?kw=" + encodeURIComponent(query);
+  if (db.id === "万方") return "https://s.wanfangdata.com.cn/paper?q=" + encodeURIComponent(query);
+  if (db.id === "维普") {
+    const key = /[A-Z]+\s*=/i.test(query) ? query : query.replace(/[^()]+/g, segment =>
+      segment.split(/(\s+AND\s+|\s+OR\s+|\s+NOT\s+)/i).map(term =>
+        !term.trim() || /^(AND|OR|NOT)$/i.test(term.trim()) ? term : "M=" + term.trim()
+      ).join("")
+    ).replace(/\)(AND|OR|NOT)\(/gi, ") $1 (");
+    return "https://qikan.cqvip.com/Qikan/Search/Index?" + new URLSearchParams({key,from:"Qikan_Search_Index"});
+  }
+  if (db.id === "SPORTDiscus") return "https://search.ebscohost.com/login.aspx?" + new URLSearchParams({direct:"true",db:"sph",bquery:query,type:"1",searchMode:"And",site:"ehost-live"});
   return db.url;
+}
+
+export function carriesQuery(db) {
+  return ["PubMed","中国知网","万方","维普","SPORTDiscus"].includes(db);
 }

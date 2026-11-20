@@ -1,5 +1,5 @@
 "use client";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Search,
   Database,
@@ -18,9 +18,9 @@ import {
   SlidersHorizontal,
   Info,
 } from "lucide-react";
-import { databases, sameStudy } from "../../research/options";
+import { databases, emptyStudy, sameStudy } from "../../research/options";
 import { copyText, pubmedRecord } from "../../research/io";
-import { buildQuery, presetLabels, dbUrl } from "../../research/query";
+import { buildQuery, presetLabels, dbUrl, carriesQuery } from "../../research/query";
 import { Field, Modal, Select, Empty, SectionHead } from "./shared";
 import { searchMedMirror } from "../../research/pubmed-mirror";
 async function searchPublicRecords(q, page, provider, cursor) {
@@ -69,10 +69,20 @@ export function SearchCenter({ lib, notify, onImport, startPreset = "core" }) {
     [logBusy, setLogBusy] = useState(false),
     [logError, setLogError] = useState(""),
     [histAll, setHistAll] = useState(false);
+  const [connections, setConnections] = useState(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch("/api/catalogs", { signal: controller.signal }).then(r => r.json()).then(d => setConnections(d.ready || {})).catch(() => { if (!controller.signal.aborted) setConnections({}); });
+    return () => controller.abort();
+  }, []);
+  const [scope, setScope] = useState("native");
+  const publicReviews = db === "Cochrane Library" && scope === "reviews";
+  const available = db === "PubMed" || publicReviews || connections?.[db];
   const requestID = useRef(0),
     cursors = useRef(["*"]);
   const source = databases.find((d) => d.id === db);
   function revise(dbNew, mode, only, limit = designLimit) {
+    if (dbNew !== db) setScope(dbNew === "Cochrane Library" && !connections?.[dbNew] ? "reviews" : "native");
     setDesignLimit(limit);
     setDb(dbNew);
     setPreset(mode);
@@ -112,12 +122,27 @@ export function SearchCenter({ lib, notify, onImport, startPreset = "core" }) {
     const requested = query.trim();
     let j;
     try {
-      j = await searchPublicRecords(
-        requested,
-        page,
-        page > 0 ? result?.provider : "PubMed",
-        cursors.current[page],
-      );
+      if (db === "PubMed") {
+        j = await searchPublicRecords(requested, page, page > 0 ? result?.provider : "PubMed", cursors.current[page]);
+      } else if (publicReviews) {
+        const mirror = () => searchMedMirror('ISSN:1469-493X AND (' + requested + ')', cursors.current[page]);
+        try {
+          if (page && result?.provider?.startsWith("Europe PMC")) throw new Error();
+          const response = await fetch("/api/pubmed", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({q:'("Cochrane Database Syst Rev"[Journal]) AND ('+requested+')',start:String(page*20)}), signal:AbortSignal.timeout(25000)});
+          if (!response.ok) throw new Error();
+          j = await response.json();
+          j.provider = "PubMed · CDSR 期刊题录";
+        } catch {
+          if (page && result?.provider?.startsWith("PubMed")) throw new Error("本页公开题录暂未返回，请重试。");
+          try { j = await mirror(); } catch { throw new Error("公开题录服务暂未响应，请稍后重试。"); }
+          j.provider = "Europe PMC · CDSR 期刊题录";
+        }
+        j.items = j.items.map(item => ({...item, id:item.pmid, url:item.doi ? "https://doi.org/"+item.doi : "https://europepmc.org/article/MED/"+item.pmid}));
+      } else {
+        const response = await fetch("/api/catalogs", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({db, q:requested, page}), signal:AbortSignal.timeout(22000)});
+        j = await response.json();
+        if (!response.ok) throw new Error(j.error || "数据库未响应。");
+      }
       if (
         page > 0 &&
         result?.provider !== "Europe PMC · MED" &&
@@ -131,7 +156,7 @@ export function SearchCenter({ lib, notify, onImport, startPreset = "core" }) {
       setResult({ ...j, page, query: requested });
       if (page === 0) {
         try {
-          await logQuery(j.total, "站内检索", j.provider, "PubMed", requested);
+          await logQuery(j.total, publicReviews ? "公开期刊题录 · 不含 CENTRAL" : "站内检索", j.provider, db, requested);
         } catch (e) {
           notify("检索完成，日志保存失败：" + e.message);
         }
@@ -140,7 +165,7 @@ export function SearchCenter({ lib, notify, onImport, startPreset = "core" }) {
       if (requestID.current === id) {
         setResult(null);
         setError(
-          e.message?.includes("专用字段")
+          db !== "PubMed" || e.message?.includes("专用字段")
             ? e.message
             : "文献接口暂时不可用。可重试，或打开 PubMed 官网运行当前检索式。",
         );
@@ -150,14 +175,19 @@ export function SearchCenter({ lib, notify, onImport, startPreset = "core" }) {
     }
   }
   const addOne = async (d) => {
-    setAdding(d.pmid);
+    setAdding(d.id || d.pmid || d.title);
     try {
-      const s = await lib.add(pubmedRecord(d));
+      const record = db === "PubMed" ? pubmedRecord(d) : {
+        ...emptyStudy(), title:d.title, original:d.title, authors:d.authors || "", journal:d.journal || "",
+        year:d.year || "", doi:d.doi || "", pmid:d.pmid || "", sources:[db],
+        links:d.url ? [{name:result.provider, url:d.url}] : [],
+      };
+      const s = await lib.add(record);
       notify(
         s === "added"
           ? "文献已添加"
           : s === "merged"
-            ? "已补充 PubMed 来源"
+            ? "已补充 " + db + " 来源"
             : "这篇文献已在库中",
       );
     } catch (e) {
@@ -189,6 +219,7 @@ export function SearchCenter({ lib, notify, onImport, startPreset = "core" }) {
   function reuse(h) {
     clear();
     setDb(h.db);
+    setScope(h.provider?.endsWith("· CDSR 期刊题录") ? "reviews" : "native");
     setQuery(h.query);
     setPreset("custom");
     setRct(false);
@@ -235,7 +266,7 @@ export function SearchCenter({ lib, notify, onImport, startPreset = "core" }) {
             <div className="line-heading">
               <h2>{db} 检索式</h2>
               <span className="source-type">
-                {db === "PubMed" ? "站内检索" : "官网检索"}
+                {available ? "站内检索" : connections ? "原库接口待授权" : "正在检查连接"}
               </span>
             </div>
             <div className="preset-line">
@@ -281,6 +312,12 @@ export function SearchCenter({ lib, notify, onImport, startPreset = "core" }) {
                 </label>
               )}
             </div>
+            {db === "Cochrane Library" && <Field label="检索范围">
+              <select value={scope} onChange={e => { clear(); setScope(e.target.value); }}>
+                <option value="native">机构专库 · CENTRAL 试验与 CDSR 综述</option>
+                <option value="reviews">公开检索 · CDSR 期刊题录（PubMed / Europe PMC）</option>
+              </select>
+            </Field>}
             <Field label="可编辑检索式">
               <textarea
                 rows={5}
@@ -296,10 +333,10 @@ export function SearchCenter({ lib, notify, onImport, startPreset = "core" }) {
             </Field>
             <p className="hint">
               <Info size={15} />
-              {source.hint}
+              {publicReviews ? "此范围仅覆盖公开索引中的 Cochrane 综述期刊题录（含方案），不含 CENTRAL 试验注册记录。" : db === "PubMed" ? source.hint : available ? "直接检索所选数据库，在下方查看并保存题录。" : connections ? "本站尚未配置该专库的机构检索授权。可从官网检索并导入导出的题录。" : "正在检查原库检索接口，可先使用官网检索。"}
             </p>
             <div className="actions wrap">
-              {db === "PubMed" && (
+              {available && (
                 <button
                   className="btn primary"
                   disabled={running || !query.trim()}
@@ -314,12 +351,13 @@ export function SearchCenter({ lib, notify, onImport, startPreset = "core" }) {
                 </button>
               )}
               <a
-                className={"btn " + (db === "PubMed" ? "" : "primary")}
+                className={"btn " + (available ? "" : "primary")}
+                onClick={() => { if (!carriesQuery(db)) copyText(query).then(ok => notify(ok ? "已复制检索式，请在官网粘贴运行。" : "请手动复制当前检索式。")); }}
                 href={dbUrl(source, query)}
                 target="_blank"
                 rel="noreferrer"
               >
-                打开{db === "PubMed" ? " PubMed " : ""}官网
+                {carriesQuery(db) ? "携检索式前往官网" : "复制检索式并打开官网"}
                 <ArrowUpRight size={15} />
               </a>
               <button
@@ -361,7 +399,7 @@ export function SearchCenter({ lib, notify, onImport, startPreset = "core" }) {
               </SectionHead>
               <p className="hint">
                 数据源 {result.provider} · 本页 {result.items.length} 篇
-                {result.provider !== "PubMed"
+                {result.provider === "Europe PMC · MED"
                   ? " · 使用 Europe PMC 中带 PMID 的 MED 题录。"
                   : ""}
               </p>
@@ -372,22 +410,20 @@ export function SearchCenter({ lib, notify, onImport, startPreset = "core" }) {
               ) : (
                 result.items.map((d, i) => {
                   const exists = lib.studies.some(
-                    (s) => sameStudy(s, d) && s.sources.includes("PubMed"),
+                    (s) => sameStudy(s, d) && s.sources.includes(db),
                   );
                   return (
-                    <div key={d.pmid} className="live-item">
+                    <div key={d.id || d.pmid || d.title + i} className="live-item">
                       <div>
                         <a
-                          href={
-                            "https://pubmed.ncbi.nlm.nih.gov/" + d.pmid + "/"
-                          }
+                          href={db === "PubMed" ? "https://pubmed.ncbi.nlm.nih.gov/" + d.pmid + "/" : d.url || undefined}
                           target="_blank"
                           rel="noreferrer"
                         >
                           {d.title}
                         </a>
                         <small>
-                          {d.journal} · {d.year} · PMID {d.pmid}
+                          {[d.journal,d.year,d.pmid ? "PMID "+d.pmid : d.id].filter(Boolean).join(" · ")}
                         </small>
                       </div>
                       <button
@@ -398,7 +434,7 @@ export function SearchCenter({ lib, notify, onImport, startPreset = "core" }) {
                         {exists ? <Check size={14} /> : <Plus size={14} />}{" "}
                         {exists
                           ? "已在库中"
-                          : adding === d.pmid
+                          : adding === (d.id || d.pmid || d.title)
                             ? "保存中"
                             : "入库"}
                       </button>

@@ -1,3 +1,4 @@
+import { catalogEndpoint } from "./catalogs.js";
 import { searchMedMirror } from "../research/pubmed-mirror.js";
 const respond = (body: unknown, status = 200) =>
   Response.json(body, { status, headers: { "Cache-Control": "no-store" } });
@@ -77,6 +78,13 @@ async function pubmed(term: string, start: number) {
 
 export async function handleWorkspace(request: Request, env: Cloudflare.Env) {
   const path = new URL(request.url).pathname;
+  if (path === "/api/catalogs") {
+    const trusted = __GLUCO_SITES_GATEWAY__ || (import.meta.env.DEV && ["127.0.0.1","localhost","[::1]"].includes(new URL(request.url).hostname));
+    if (!trusted && request.method !== "GET") return respond({error:"机构检索需要配置可信身份网关。"},403);
+    const req = new Request(request);
+    if (!__GLUCO_SITES_GATEWAY__) req.headers.set("oai-authenticated-user-id","local-researcher");
+    return catalogEndpoint(req,env);
+  }
   if (path === "/api/pubmed") {
     if (!["GET", "POST"].includes(request.method))
       return respond({ error: "不支持的操作" }, 405);
